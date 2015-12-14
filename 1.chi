@@ -1,0 +1,55 @@
+include "stdio.h"
+include "stdlib.h"
+include "stdbool.h"
+
+
+	Structs
+
+# [data]
+vec [int*]
+length [int]
+size [int]
+
+
+	Generics and function pointers
+
+# [T].map
+» list [T]
+» fn [T.memoryContent » T.memoryContent]
+» newList [T]
+
+? list.memoryContent
+
+newList.1 = fn(list.1)
+(list + 1).map(fn) » newList + 1
+
+
+	Basic language features
+
+# main
+» numVars [int]
+» varArray [const char**]
+« errorCode [int]
+
+printf: "Hello!\n"
+fn()	» array [float×4]
+	» abc [int]
+
+printf: "Hello again!\n"
+? array.fn: abc.memoryAddress
+
+printf: "Hello, for the last time.\n"
+stderr.fprintf: "No errors\n"
+errorCode = 0
+
+
+# fn
+» list [float*]
+» num [int*]
+
+? num
+? num.memoryContent == 0
+? list
+
+num.memoryContent = 5
+list.1 = 10
