@@ -1,0 +1,5 @@
+bison -d -y	chi.y
+flex		chi.l
+
+gcc -c --std=gnu11	lex.yy.c y.tab.c
+gcc -o chi		lex.yy.o y.tab.o

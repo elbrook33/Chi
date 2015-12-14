@@ -1,224 +1,104 @@
-	# Chi
-	Simple syntax for C.
-	(Now optimised for proportional fonts.)
-	Parser needs parseFnInput, parseFnOutput, parseFnCondition,
-	parseType, parseGlobalVar, parseComment, parseCommentBlock, parseRawCode,
-	porting to C, text-range library and testing.
-	Tuples: Since need to have special treatment anyway, could test differently, i.e. Tuple.OK?
-	The other alternative is malloc and free. Stack is preferred for this, I think.
+# Chi
 
-# parse-Chi
-» Code [text-range]
-« Parsed-block [dict]
+A nicer syntax for working with C libraries.
 
-Code.parseBlock-Chi:
-	» Parsed-block
-	» Discarded-tail [text-range]
 
-# parseBlock-Chi
-» Code [text-range]
-? Code.word(1) == "#"
-« Parsed-tree [dict]
-« Remaining-code [text-range]
+## Features
 
-o Block.fromWord(2).parseFn-Chi:
-_o Block.fromWord(2).parseType-Chi:_
-_o Block.fromWord(2).parseGlobalVar-Chi:_
-	» Parsed-tree
-	» Tail [text-range]
+- Chaining syntax.
+- Assertions.
+- Shorthands for declaring and initialising variables.
+- Return several values.
+- Default return values.
+- Default parametres.
+- Default to struct arrays with bounds (and checking) (and _implicit de-struct-ing_).
+- Shorthands for appending to arrays.
+- Various loops over arrays: inOrder, until, reduce, replace, filter
 
-Tail.parseBlock-Chi:
-	» Parsed-tree
-	» Remaining-code
 
-# parseFn-Chi
-» Code [text-range]
-_? Code.word(1) != "["_
-? Code.line(1).wordCount() == 1
-« Parsed-tree [dict]
-« Remaining-code [text-range]
+---
 
-Code.fromLine(2).parseFnBody-Chi:
-	» Tree-node [dict]
-	» Remaining-code
+# fnName
+» param [const int*] « null
+« returnVal [const int*] « null
 
-Tree-node.dictItem("fn")
-	.addText: Code.word(1), "name"
-	» Parsed-tree
+iff *param > 0
 
-# parseFnBody-Chi
-» Code [text-range]
-? Code.word(1) != "#"
-« Parsed-tree [dict]
-« Remaining-code [text-range] = Code
+iff param.fn(3)
+	» v [float × 4]
+	» t [int]
 
-o Code.parseFnInput-Chi:
-o Code.parseFnOutput-Chi:
-o Code.parseFnCondition-Chi:
-o Code.parseBooleanList-Chi:
-o Code.parseSingleStatement-Chi:
-	» Parsed-tree
-	» Tail [text-range]
+1 » v.1
+5 » v
 
-Tail.parseFnBody-Chi:
-	» Parsed-tree
-	» Remaining-code
+v.until( i »
+	o i.isPrime()
+	o i == pi )
+» returnVal
 
-# parseSingleStatement-Chi
-» Code [text-range]
-« Parsed-tree [dict]
-« Remaining-code [text-range]
+```c
+bool fnName(const int* param, const int** returnVal)
+{
+	*returnVal = NULL;
+	
+	if(!(*param > 0)) {
+		printf("fnName: Failed on *param > 0\n");
+		return false;
+	}
+	
+	floatArray v = emptyArray;
+	float vBlock[4] = {0, 0, 0, 0};
+	v.block = vBlock;
+	v.size = 4;
 
-Code.parseExpression-Chi:
-	» Parsed-tree
-	» Tail [text-range]
+	int t = 0;	
+	int ok = fn(param, 3, v.block, &t);
+	v.length = 4;
+	
+	if(!ok) {
+		printf("fnName: Failed on fn(param, 3, v.block, &t)\n");
+		return false;
+	}
+	
+	if(0 >= 0 && 0 < v.length) {
+		v.block[0] = 1;
+	} else {
+		printf("fnName: Can't replace v at index 1 with 1 - out of bounds.\n");
+	}
+	
+	if(v.length < v.size) {
+		v.block[v.length] = 5;
+		v.length++;
+	} else {
+		printf("fnName: Can't append 5 to v - array is full.\n");
+	}
+	
+	for(int counter = 0; counter < v.length; counter++) {
+		floatIndex i = {counter, v.block[counter]};
+		int* result = NULL;
+		result = result? result : isPrime(i.val);
+		result = result? result :  i.val == pi;
+		if(result) {
+			*returnVal = result;
+			break;
+		}
+	}
+	
+	return true;
+}
+```
 
-Code.parseOutput-Chi:
-	» Parsed-tree
-	» Remaining-code
+---
 
-# parseExpression-Chi
-» Code [text-range]
-« Parsed-tree [dict]
-« Remaining-code [text-range]
-
-Code.parseChain-Chi:
-	» Parsed-tree
-	» Tail [text-range]
-
-Code.parseInfixOperator-Chi:
-	» Parsed-tree
-	» Remaining-code
-
-# parseChain-Chi
-» Code [text-range]
-« Parsed-tree [dict]
-« Remaining-code [text-range]
-
-o Code.parseFnCall-Chi:
-o Code.parseVar-Chi:
-o Code.parseNum-Chi:
-o Code.parseQuote-Chi:
-	» Parsed-tree
-	» Tail [text-range]
-
-* Tail.word(1) == "."
-* Tail.fromWord(2).parseChain-Chi:
-	» Tree-node [dict]
-	» Remaining-code
-
-Tree-node.dictItem: "chained"
-	» Parsed-tree
-
-# parseFnCall-Chi
-» Code [text-range]
-? Code.word(2) == "(" or ":"
-« Parsed-tree [dict]
-« Remaining-code [text-range]
-
-Code.fromWord(2).parseFnParam-Chi:
-	» Tree-node [dict]
-	» Tail [text-range]
-
-Tree-node.dictItem: "fn-call"
-	.addText: Code.word(1), "name"
-	» Parsed-tree
-
-* Code.word(2) == "("
-* Tail.word(1) == ")"
-* Tail.fromWord(2)
-o Tail
-	» Remaining-code
-
-# parseFnParam-Chi
-» Code [text-range]
-? Code.word(1) == "(" or ":" or ","
-« Parsed-tree [dict]
-« Remaining-code [text-range] = Code
-
-Code.fromWord(2).parseExpression-Chi:
-	» Parsed-tree
-	» Tail [text-range]
-
-Tail.parseFnParam-Chi
-	» Parsed-tree
-	» Remaining-code
-
-# parseVar-Chi
-» Code [text-range]
-? Code.wordType(1) == WordTypeWord
-« Parsed-tree [dict]
-« Remaining-code [text-range]
-
-Code.word(1).dictItem("var")
-	.addText: Code.word(1), "name"
-	» Parsed-tree
-Code.fromWord(2)
-	» Remaining-code
-
-# parseNum-Chi
-» Code [text-range]
-? Code.wordType(1) == NumTypeWord
-« Parsed-tree [dict]
-« Remaining-code [text-range]
-
-Code.word(1).dictItem("num")
-	.addText: Code.word(1), "val"
-	» Parsed-tree
-Code.fromWord(2)
-	» Remaining-code
-
-# parseVar-Chi
-» Code [text-range]
-? Code.wordType(1) == QuoteTypeWord
-« Parsed-tree [dict]
-« Remaining-code [text-range]
-
-Code.word(1).dictItem("quote")
-	.addText: Code.word(1), "text"
-	» Parsed-tree
-Code.fromWord(2)
-	» Remaining-code
-
-# parseInfixOperator-Chi
-» Code [text-range]
-? Code.word(1) == "+" or "-" or "÷" or "×" or "or" or "==" or "!=" or "<" or ">" or "≤" or "≥"
-« Parsed-tree [dict]
-« Remaining-code [text-range]
-
-Code.word(1).textItem: "operator"
-	» Parsed-tree
-Code.fromWord(2).parseExpression:
-	» Parsed-tree
-	» Remaining-code
-
-# parseBooleanList-Chi
-» Code [text-range]
-? Code.word(1) == "*" or "o"
-« Parsed-tree [dict]
-« Remaining-code [text-range]
-
-Code.parseBooleanListItem-Chi:
-	» Parsed-tree
-	» Tail [text-range]
-
-Tail.parseOutput-Chi:
-	» Parsed-tree
-	» Remaining-code
-
-# parseBooleanListItem-Chi
-» Code [text-range]
-? Code.word(1) == "*" or "o"
-« Parsed-tree [dict]
-« Remaining-code [text-range]
-
-Code.fromWord(2).parseExpression:
-	» Tree-node [dict]
-	» Tail [text-range]
-
-Tree-node.dictItem: Code.word(1)
-	» Parsed-tree
-
-Tail.parseBooleanListItem-Chi:
-	» Parsed-tree
-	» Remaining-code
+Parsing
+```c
+const int * fnName ( const int * param );
+```
+1. Remove all { ... } – replace with ;
+2. Separate by ;
+3. Find all ( ... )
+4. Word before ( is function name
+5. Everything before is return type
+6. Separate parametres by ,
+7. Last word of each is parametre name
+8. Rest is type
