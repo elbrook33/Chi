@@ -47,6 +47,7 @@
 		char* returnType;
 		int params;
 		char** paramTypes;
+		char** paramDefaults;
 	};
 	struct fnList {
 		struct fn* list;
@@ -69,22 +70,17 @@
 %}
 
 %code requires {
-	struct var {
+	struct block {
 		char* type;
-		char* name;
-		char* defaultValue;
-		char* failValue;
-		char* initialiser;
-	};
-	struct leaves {
+		
 		char* preScope;
 		char* preBlock;
 		char* blockHead;
 		char* blockTail;
 		char* postBlock;
 	};
-	struct array {
-		void* array;
+	struct blockList {
+		struct block* array;
 		int length;
 	};
 }
@@ -92,14 +88,12 @@
 	char* str;
 	int intVal;
 	float floatVal;
-	struct var var;
-	struct array array;
-	struct leaves leaves;
+	struct block block;
+	struct blockList list;
 }
-%type	<str> commands params body statement value fnCall fnName fnObject type literal
-%type	<var> varDef return
-%type	<array> varList
-%type	<leaves> blocks fnHead fnTail paramList inlineFn
+%type	<str> commands params body statement value fnCall type literal //fnName fnObject
+%type	<list> varList
+%type	<block> blocks fnHead fnTail paramList inlineFn varDef return
 %token	<str> COMMENT WORD CONST QUOTE OP IN OUT CROSS REF DEREF
 %token	<intVal> INT
 %token	<floatVal> FLOAT
@@ -163,7 +157,7 @@ blocks '#' WORD params return body
 			"%s\n"
 			"\treturn %s;\n"
 		"}",
-		$5.type, $3, $4, $5.initialiser, $6, $5.name);
+		$5.type, $3, $4, $5.blockTail, $6, $5.blockHead);
 	$$.preBlock = combine($1.preBlock, h, "\n");
 	$$.blockHead = combine($1.blockHead, c, "\n");
 }
@@ -176,22 +170,20 @@ params:
 |
 IN varDef
 {
-	$$ = format($$, "%s %s", $2.type, $2.name);
+	$$ = format($$, "%s %s", $2.type, $2.blockHead);
 }
 |
 params IN varDef
 {
-	$$ = format($$, "%s, %s %s", $1, $3.type, $3.name);
+	$$ = format($$, "%s, %s %s", $1, $3.type, $3.blockHead);
 }
 ;
 
 return:
 {
 	$$.type = "bool";
-	$$.name = "fnSuccess";
-	$$.defaultValue = "true";
-	$$.failValue = "false";
-	$$.initialiser = "bool fnSuccess = true";
+	$$.blockHead = "fnSuccess";
+	$$.blockTail = "bool fnSuccess = true";
 }
 |
 OUT varDef
@@ -220,7 +212,7 @@ body statement
 
 statement:
 // Function calls
-fnCall
+value
 {
 	$$ = format($$, "\t%s;", $1);
 }
@@ -240,7 +232,59 @@ value '=' value
 // Assignments (including initialisations)
 varDef
 {
-	$$ = format($$, "\t%s;", $1.initialiser);
+	$$ = format($$, "\t%s;", $1.blockTail);
+}
+;
+
+value:
+WORD | literal
+|
+// Negatives, etc.
+OP value
+{
+	$1 = translateOp($1);
+	$$ = format($$, "%s%s", $1, $2);
+}
+|
+// Infix operator
+value OP value
+{
+	$2 = translateOp($2);
+	$$ = format($$, "%s %s %s", $1, $2, $3);
+}
+|
+// Array element
+value '.' INT
+{
+	$$ = format($$, "%s[%i]", $1, $3-1);
+}
+|
+// Dereferencing
+value '.' DEREF
+{
+	$$ = format($$, "*%s", $1);
+	// Should test non-null here.
+}
+|
+// Referencing
+value '.' REF
+{
+	$$ = format($$, "&%s", $1);
+}
+|
+// Function call
+fnCall
+|
+// Struct field
+value '.' WORD
+{
+	$$ = format($$, "%s.%s", $1, $3);
+}
+|
+// Grouping by parentheses
+'(' value ')'
+{
+	$$ = format($$, "(%s)", $2);
 }
 ;
 
@@ -255,13 +299,14 @@ fnTail
 	char* pre = combine($1.preBlock, $1.blockHead, ";\n\t");
 	$$ = format($$, "%s(%s)", pre, $1.blockTail);
 	printf("%s\n", $1.preScope);
-	popFn();
+	//popFn();
 	counter++;
 }
 ;
 
+/*
 fnName:
-WORD
+value
 {
 	if(!currentFn(fnStack) || currentFn(fnStack)->stackID != counter) {
 		struct fn f = {0};
@@ -289,23 +334,24 @@ value
 	$$ = $1;
 }
 ;
+*/
 
 fnHead:
-fnName ':' paramList
+WORD ':' paramList
 {
 	$$.preScope = $3.preScope;
 	$$.blockHead = $1;
 	$$.blockTail = $3.blockTail;
 }
 |
-fnName '(' paramList ')'
+WORD '(' paramList ')'
 {
 	$$.preScope = $3.preScope;
 	$$.blockHead = $1;
 	$$.blockTail = $3.blockTail;
 }
 |
-fnObject '.' fnName ':' paramList
+value '.' WORD ':' paramList
 {
 	char* params = combine($1, $5.blockTail, ", ");
 	$$.preScope = $5.preScope;
@@ -313,7 +359,7 @@ fnObject '.' fnName ':' paramList
 	$$.blockTail = params;
 }
 |
-fnObject '.' fnName '(' paramList ')'
+value '.' WORD '(' paramList ')'
 {
 	char* params = combine($1, $5.blockTail, ", ");
 	$$.preScope = $5.preScope;
@@ -408,7 +454,7 @@ varList IN value '[' type ']'
 	{
 		varGet = format(varGet,
 			"%s = va_arg(args, %s)",
-			((struct var*)$1.array)[i].name, ((struct var*)$1.array)[i].type);
+			$1.array[i].blockHead, $1.array[i].type);
 		varSetup = combine(varSetup, varGet, ";\n\t");
 	}
 	$$.preScope = format($$.preScope,
@@ -447,48 +493,42 @@ WORD
 varDef:
 WORD '[' type ']' {
 	$$.type = $3;
-	$$.name = $1;
-	$$.defaultValue = "{0}";
-	$$.failValue = "{0}";
-	$$.initialiser = format($$.initialiser,
-		"%s %s = %s",
-		$$.type, $$.name, $$.defaultValue);
+	$$.blockHead = $1;
+	$$.blockTail = format($$.blockTail,
+		"%s %s = {0}",
+		$$.type, $$.blockHead);
 }
 | WORD '[' type CROSS INT ']' {
 	$$.type = format($$.type, "%s*", $3);
-	$$.name = $1;
-	$$.defaultValue = "{0}";
-	$$.failValue = "{0}";
-	$$.initialiser = format($$.initialiser,
-		"%s %s[%i] = %s",
-		$$.type, $$.name, $$.defaultValue);
+	$$.blockHead = $1;
+	$$.blockTail = format($$.blockTail,
+		"%s %s[%i] = {0}",
+		$$.type, $$.blockHead);
 }
 | WORD '[' type ']' '=' value {
 	$$.type = $3;
-	$$.name = $1;
-	$$.defaultValue = $6;
-	$$.failValue = "{0}";
-	$$.initialiser = format($$.initialiser,
+	$$.blockHead = $1;
+	$$.blockTail = format($$.blockTail,
 		"%s %s = %s",
-		$$.type, $$.name, $$.defaultValue);
+		$$.type, $$.blockHead, $6);
 }
 ;
 
 varList:
 WORD ',' varDef {
-	$$.array = malloc(sizeof(struct var) * 100);
+	$$.array = malloc(sizeof(struct block) * 100);
 	$$.length = 2;
-	((struct var*)$$.array)[0] = $3;
-	((struct var*)$$.array)[0].name = $1;
-	((struct var*)$$.array)[1] = $3;
+	$$.array[0] = $3;
+	$$.array[0].blockHead = $1;
+	$$.array[1] = $3;
 }
 | varDef {
-	$$.array = malloc(sizeof(struct var) * 100);
+	$$.array = malloc(sizeof(struct block) * 100);
 	$$.length = 1;
-	((struct var*)$$.array)[0] = $1;
+	$$.array[0] = $1;
 }
 | varList ',' varDef {
-	((struct var*)$$.array)[$$.length] = $3;
+	$$.array[$$.length] = $3;
 	$$.length += 1;
 }
 ;
@@ -501,58 +541,6 @@ INT {
 	$$ = format($$, "%f", $1);
 }
 | CONST | QUOTE
-;
-
-value:
-WORD | literal
-|
-// Negatives, etc.
-OP value
-{
-	$1 = translateOp($1);
-	$$ = format($$, "%s%s", $1, $2);
-}
-|
-// Infix operator
-value OP value
-{
-	$2 = translateOp($2);
-	$$ = format($$, "%s %s %s", $1, $2, $3);
-}
-|
-// Array element
-value '.' INT
-{
-	$$ = format($$, "%s[%i]", $1, $3-1);
-}
-|
-// Dereferencing
-value '.' DEREF
-{
-	$$ = format($$, "*%s", $1);
-	// Should test non-null here.
-}
-|
-// Referencing
-value '.' REF
-{
-	$$ = format($$, "&%s", $1);
-}
-|
-// Function call
-fnCall
-|
-// Struct field
-value '.' WORD
-{
-	$$ = format($$, "%s.%s", $1, $3);
-}
-|
-// Grouping by parentheses
-'(' value ')'
-{
-	$$ = format($$, "(%s)", $2);
-}
 ;
 
 
