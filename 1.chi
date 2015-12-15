@@ -5,23 +5,23 @@ include "stdbool.h"
 
 	Structs
 
-# [data]
-vec [int*]
-length [int]
-size [int]
+	# [data]
+	vec [int*]
+	length [int]
+	size [int]
 
 
 	Generics and function pointers
 
-# [T].map
-» list [T]
-» fn [T.memoryContent » T.memoryContent]
-» newList [T]
+	# [T].map
+	» list [T]
+	» fn [T.memoryContent » T.memoryContent]
+	» newList [T]
 
-? list.memoryContent
+	? list.memoryContent
 
-newList.1 = fn(list.1)
-(list + 1).map(fn) » newList + 1
+	newList.1 = fn(list.1)
+	(list + 1).map(fn) » newList + 1
 
 
 	Basic language features

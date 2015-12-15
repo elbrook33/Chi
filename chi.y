@@ -4,11 +4,11 @@
  * ## To do:
  * - Boolean lists.
  * - Structs. (Enums?)
- * - Function pointers.
+ * - Function pointer types.
  * - Generics.
- * - Move expressions → leaves.
+ * - Move values → leaves.
  * - Add type to leaves.
- * - Move inline functions → expressions.
+ * - Move inline functions → values.
  * - Types, param numbers… (parse function headers…)
  * - Need AST for inferences.
 */
@@ -38,7 +38,34 @@
 		return temp;
 	}
 	
-	static int counter = 0;
+	static int counter = 1;
+	
+	struct fn {
+		int stackID;
+		char* name;
+		char* objectType;
+		char* returnType;
+		int params;
+		char** paramTypes;
+	};
+	struct fnList {
+		struct fn* list;
+		int length;
+	};
+	struct fnList fnStack = {0};
+	
+	void pushFn(struct fn fn) {
+		fnStack.list[fnStack.length] = fn;
+		fnStack.length += 1;
+	}
+	struct fn popFn() {
+		fnStack.length -= 1;
+		return fnStack.list[fnStack.length];
+	}
+	struct fn* currentFn() {
+		if(fnStack.length == 0) return NULL;
+		return fnStack.list + fnStack.length - 1;
+	}
 %}
 
 %code requires {
@@ -59,7 +86,6 @@
 	struct array {
 		void* array;
 		int length;
-		int size;
 	};
 }
 %union	{
@@ -70,11 +96,11 @@
 	struct array array;
 	struct leaves leaves;
 }
-%type	<str> commands params body statement expression fnCall type literal
+%type	<str> commands params body statement value fnCall fnName fnObject type literal
 %type	<var> varDef return
 %type	<array> varList
 %type	<leaves> blocks fnHead fnTail paramList inlineFn
-%token	<str> WORD CONST QUOTE OP IN OUT CROSS REF DEREF
+%token	<str> COMMENT WORD CONST QUOTE OP IN OUT CROSS REF DEREF
 %token	<intVal> INT
 %token	<floatVal> FLOAT
 
@@ -85,7 +111,8 @@
 //
 
 code:
-commands blocks {
+commands blocks
+{
 	printf("%s\n%s\n%s\n", $1, $2.preBlock, $2.blockHead);
 }
 ;
@@ -96,11 +123,17 @@ commands blocks {
 //
 
 commands:
-{ $$ = ""; }
-| WORD QUOTE {
+{
+	$$ = "";
+}
+|
+WORD QUOTE
+{
 	$$ = format($$, "#%s %s", $1, $2);
 }
-| commands WORD QUOTE {
+|
+commands WORD QUOTE
+{
 	$$ = format($$, "%s\n#%s %s", $1, $2, $3);
 }
 ;
@@ -110,9 +143,26 @@ blocks:
 	$$.preBlock = "";
 	$$.blockHead = "";
 }
-| blocks '#' WORD params return body {
-	char* h = format(h, "%s %s(%s);", $5.type, $3, $4);
-	char* c = format(c, "%s %s(%s)\n{\n\t%s;\n%s\n\treturn %s;\n}",
+|
+blocks COMMENT
+{
+	char* comment = format(comment, "/*%s\n\n*/", $2);
+	$$.preBlock = $1.preBlock;
+	$$.blockHead = combine($1.blockHead, comment, "\n");
+}
+|
+blocks '#' WORD params return body
+{
+	char* h = format(h,
+		"%s %s(%s);",
+		$5.type, $3, $4);
+	char* c = format(c,
+		"%s %s(%s)\n"
+		"{\n"
+			"\t%s;\n"
+			"%s\n"
+			"\treturn %s;\n"
+		"}",
 		$5.type, $3, $4, $5.initialiser, $6, $5.name);
 	$$.preBlock = combine($1.preBlock, h, "\n");
 	$$.blockHead = combine($1.blockHead, c, "\n");
@@ -123,10 +173,14 @@ params:
 {
 	$$ = "void";
 }
-| IN varDef {
+|
+IN varDef
+{
 	$$ = format($$, "%s %s", $2.type, $2.name);
 }
-| params IN varDef {
+|
+params IN varDef
+{
 	$$ = format($$, "%s, %s %s", $1, $3.type, $3.name);
 }
 ;
@@ -139,7 +193,9 @@ return:
 	$$.failValue = "false";
 	$$.initialiser = "bool fnSuccess = true";
 }
-| OUT varDef {
+|
+OUT varDef
+{
 	$$ = $2;
 }
 ;
@@ -150,105 +206,115 @@ return:
 //
 
 body:
-{ $$ = ""; }
-| statement
-| body statement {
-	$$ = format($$, "%s\n%s", $1, $2);
+{
+	$$ = "";
+}
+|
+statement
+|
+body statement
+{
+	$$ = combine($1, $2, "\n");
 }
 ;
 
 statement:
-expression {
+// Function calls
+fnCall
+{
 	$$ = format($$, "\t%s;", $1);
 }
-| '?' expression {
-	$$ = format($$, "\tif (!(%s)) { fprintf(stderr, \"Failed at check: %s\\n\"); return 0; }", $2, $2);
+|
+// Assertions
+'?' value
+{
+	$$ = format($$, "\tif (!(%s))\n\t{\n\t\tfprintf(stderr, \"Failed at check: %s\\n\");\n\t\treturn 0;\n\t}", $2, $2);
 }
-| WORD '=' expression {
+|
+// Assignments
+value '=' value
+{
 	$$ = format($$, "\t%s = %s;", $1, $3);
 }
-| varDef '=' expression {
-	$$ = format($$, "\t%s;\n\t%s = %s;", $1.initialiser, $1.name, $3);
+|
+// Assignments (including initialisations)
+varDef
+{
+	$$ = format($$, "\t%s;", $1.initialiser);
 }
 ;
 
 
 //
-// Expressions: function calls, infix operators, accessing structs and arrays.
+// Function calls
 //
-
-expression:
-WORD | literal
-
-// Negatives, etc.
-| OP expression {
-	$1 = translateOp($1);
-	$$ = format($$, "%s%s", $1, $2);
-}
-
-// Infix operator
-| expression OP expression {
-	$2 = translateOp($2);
-	$$ = format($$, "%s %s %s", $1, $2, $3);
-}
-
-// Array element
-| expression '.' INT {
-	$$ = format($$, "%s[%i]", $1, $3-1);
-}
-
-// Dereferencing
-| expression '.' DEREF {
-	$$ = format($$, "*%s", $1);
-	// Should test non-null here.
-}
-
-// Referencing
-| expression '.' REF {
-	$$ = format($$, "&%s", $1);
-}
-
-// Function call
-| fnCall
-
-// Struct field
-| expression '.' WORD {
-	$$ = format($$, "%s.%s", $1, $3);
-}
-
-// Grouping by parentheses
-| '(' expression ')' {
-	$$ = format($$, "(%s)", $2);
-}
-;
-
 
 fnCall:
-fnTail {
+fnTail
+{
 	char* pre = combine($1.preBlock, $1.blockHead, ";\n\t");
 	$$ = format($$, "%s(%s)", pre, $1.blockTail);
 	printf("%s\n", $1.preScope);
+	popFn();
+	counter++;
+}
+;
+
+fnName:
+WORD
+{
+	if(!currentFn(fnStack) || currentFn(fnStack)->stackID != counter) {
+		struct fn f = {0};
+		f.stackID = counter;
+		f.name = $1;
+		pushFn(f);
+	} else {
+		currentFn()->name = $1;
+	}
+	
+	// Function inferencing stuff goes here.
+	// Through here.
+	
+	$$ = $1;
+}
+;
+fnObject:
+value
+{
+	struct fn f = {0};
+	f.stackID = counter;
+	f.objectType = $1;
+	pushFn(f);
+	
+	$$ = $1;
 }
 ;
 
 fnHead:
-expression ':' paramList {
+fnName ':' paramList
+{
 	$$.preScope = $3.preScope;
 	$$.blockHead = $1;
 	$$.blockTail = $3.blockTail;
 }
-| expression '(' paramList ')' {
+|
+fnName '(' paramList ')'
+{
 	$$.preScope = $3.preScope;
 	$$.blockHead = $1;
 	$$.blockTail = $3.blockTail;
 }
-| expression '.' WORD ':' paramList {
+|
+fnObject '.' fnName ':' paramList
+{
 	char* params = combine($1, $5.blockTail, ", ");
 	$$.preScope = $5.preScope;
 	$$.blockHead = $3;
 	$$.blockTail = params;
 }
-| expression '.' WORD '(' paramList ')' {
+|
+fnObject '.' fnName '(' paramList ')'
+{
 	char* params = combine($1, $5.blockTail, ", ");
 	$$.preScope = $5.preScope;
 	$$.blockHead = $3;
@@ -257,18 +323,23 @@ expression ':' paramList {
 ;
 
 fnTail:
-fnHead {
+fnHead
+{
 	$$.preBlock = "";
 	$$.blockHead = $1.blockHead;
 	$$.blockTail = $1.blockTail;
 }
-| fnTail IN WORD {
+|
+fnTail IN WORD
+{
 	char* ptr = format(ptr, "&%s", $3);
 	$$.preBlock = "";
 	$$.blockHead = $1.blockHead;
 	$$.blockTail = combine($1.blockTail, ptr, ", ");
 }
-| fnTail IN WORD '[' type ']' {
+|
+fnTail IN WORD '[' type ']'
+{
 	char* ptr = format(ptr, "&%s", $3);
 	char* pre = format(pre, "%s %s = {0}", $5, $3);
 	char* preList = combine($1.preBlock, pre, ";\n\t");
@@ -276,14 +347,18 @@ fnHead {
 	$$.blockHead = $1.blockHead;
 	$$.blockTail = combine($1.blockTail, ptr, ", ");
 }
-| fnTail IN WORD '[' type CROSS INT ']' {
+|
+fnTail IN WORD '[' type CROSS INT ']'
+{
 	char* pre = format(pre, "%s %s[%i] = {0}", $5, $3, $7);
 	char* preList = combine($1.preBlock, pre, ";\n\t");
 	$$.preBlock = preList;
 	$$.blockHead = $1.blockHead;
 	$$.blockTail = combine($1.blockTail, $3, ", ");
 }
-| fnTail IN literal {
+|
+fnTail IN literal
+{
 	$$.preBlock = "";
 	$$.blockHead = $1.blockHead;
 	$$.blockTail = combine($1.blockTail, $3, ", ");
@@ -295,21 +370,29 @@ paramList:
 	$$.preScope = "";
 	$$.blockTail = "";
 }
-| inlineFn {
+|
+inlineFn
+{
 	$$.preScope = $1.preScope;
 	$$.blockTail = $1.blockTail;
 }
-| expression {
+|
+value
+{
 	$$.preScope = "";
 	$$.blockTail = $1;	
 }
-| paramList ',' inlineFn {
+|
+paramList ',' inlineFn
+{
 	$$.preScope = combine($1.preScope, $3.preScope, "\n");
 	$$.blockTail = format($$.blockTail,
 		"%s, %s",
 		$1.blockTail, $3.blockTail);
 }
-| paramList ',' expression {
+|
+paramList ',' value
+{
 	$$.preScope = $1.preScope;
 	$$.blockTail = format($$.blockTail,
 		"%s, %s",
@@ -318,7 +401,8 @@ paramList:
 ;
 
 inlineFn:
-varList IN expression '[' type ']' {
+varList IN value '[' type ']'
+{
 	char *varSetup = "", *varGet = "";
 	for(int i = 0; i < $1.length; i++)
 	{
@@ -337,11 +421,7 @@ varList IN expression '[' type ']' {
 		"\treturn %s;\n"
 		"}",
 		$5, counter, varSetup, $3);
-	$$.blockTail = format($$.blockTail,
-//		"inlineFn%i, %i",
-//		counter, $1.length);
-		"inlineFn%i",
-		counter);
+	$$.blockTail = format($$.blockTail, "inlineFn%i", counter);
 	counter++;
 }
 ;
@@ -383,7 +463,7 @@ WORD '[' type ']' {
 		"%s %s[%i] = %s",
 		$$.type, $$.name, $$.defaultValue);
 }
-| WORD '[' type ']' '=' expression {
+| WORD '[' type ']' '=' value {
 	$$.type = $3;
 	$$.name = $1;
 	$$.defaultValue = $6;
@@ -396,16 +476,14 @@ WORD '[' type ']' {
 
 varList:
 WORD ',' varDef {
-	$$.array = malloc(sizeof(struct array) * 100);
-	$$.size = 100;
+	$$.array = malloc(sizeof(struct var) * 100);
 	$$.length = 2;
 	((struct var*)$$.array)[0] = $3;
 	((struct var*)$$.array)[0].name = $1;
 	((struct var*)$$.array)[1] = $3;
 }
 | varDef {
-	$$.array = malloc(sizeof(struct array) * 100);
-	$$.size = 100;
+	$$.array = malloc(sizeof(struct var) * 100);
 	$$.length = 1;
 	((struct var*)$$.array)[0] = $1;
 }
@@ -425,6 +503,59 @@ INT {
 | CONST | QUOTE
 ;
 
+value:
+WORD | literal
+|
+// Negatives, etc.
+OP value
+{
+	$1 = translateOp($1);
+	$$ = format($$, "%s%s", $1, $2);
+}
+|
+// Infix operator
+value OP value
+{
+	$2 = translateOp($2);
+	$$ = format($$, "%s %s %s", $1, $2, $3);
+}
+|
+// Array element
+value '.' INT
+{
+	$$ = format($$, "%s[%i]", $1, $3-1);
+}
+|
+// Dereferencing
+value '.' DEREF
+{
+	$$ = format($$, "*%s", $1);
+	// Should test non-null here.
+}
+|
+// Referencing
+value '.' REF
+{
+	$$ = format($$, "&%s", $1);
+}
+|
+// Function call
+fnCall
+|
+// Struct field
+value '.' WORD
+{
+	$$ = format($$, "%s.%s", $1, $3);
+}
+|
+// Grouping by parentheses
+'(' value ')'
+{
+	$$ = format($$, "(%s)", $2);
+}
+;
+
+
 %%
 
 void yyerror(const char* errorText)
@@ -434,6 +565,6 @@ void yyerror(const char* errorText)
 
 int main(void)
 {
-	//tree = newDict();
+	fnStack.list = malloc(sizeof(struct fn) * 100);
 	return yyparse();
 }

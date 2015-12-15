@@ -5,6 +5,10 @@
 
 %%
 
+(\n\n\t[^\n]+)(\n\t[^\n]+)* {
+	yylval.str = strdup(yytext); return COMMENT;
+}	
+
 [ \t\n]
 ;
 
